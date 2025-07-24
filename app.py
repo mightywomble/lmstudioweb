@@ -53,12 +53,12 @@ INDEX_HTML = """
         
         // IMPORTANT: Replace with your actual Firebase config
         const firebaseConfig = {
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_AUTH_DOMAIN",
-            projectId: "YOUR_PROJECT_ID",
-            storageBucket: "YOUR_STORAGE_BUCKET",
-            messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-            appId: "YOUR_APP_ID"
+            apiKey: "AIzaSyDdc_xEZpNjhZ6vg0sLMpUr28dF8POOp94",
+            authDomain: "lmstudioweb.firebaseapp.com",
+            projectId: "lmstudioweb",
+            storageBucket: "lmstudioweb.firebasestorage.app",
+            messagingSenderId: "748422148481",
+            appId: "1:748422148481:web:05474a8e2bdb8f40923880"
         };
 
         // Initialize Firebase
