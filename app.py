@@ -25,7 +25,7 @@ def load_firebase_config():
         # Dynamically import the config file
         from config import FIREBASE_CONFIG
         return FIREBASE_CONFIG
-    except (ImportError, AttributeError):
+    except (ImportError, AttributeError, SyntaxError):
         # Handle cases where the file exists but is empty or malformed
         return {}
 
@@ -33,11 +33,11 @@ def save_firebase_config(config_data):
     """Saves the Firebase config dict to config.py."""
     with open(CONFIG_FILE_PATH, 'w') as f:
         f.write("# This file is generated automatically. Do not edit manually.\n")
-        f.write("# Add this file to your .gitignore to keep credentials secure.\n")
+        f.write("# Add this file to your .gitignore to keep credentials secure.\n\n")
         f.write("FIREBASE_CONFIG = ")
         # Use json.dumps for proper formatting of a Python dictionary
         f.write(json.dumps(config_data, indent=4))
-    print(f"Firebase configuration saved to {CONFIG_FILE_PATH}")
+    print(f"Firebase configuration saved to {CONFIG_FILE_PATH}. Please restart the server.")
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
@@ -114,11 +114,12 @@ INDEX_HTML = """
             trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
             menu: "M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z",
             send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z",
-            settings: "M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
+            settings: "M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69-.98l-2.49-1c-.23-.09-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.09.49 0 .61.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z"
         };
         
         const SettingsModal = ({ isOpen, onClose, currentConfig }) => {
             const [config, setConfig] = useState(currentConfig);
+            const [saveStatus, setSaveStatus] = useState('idle'); // 'idle', 'saving', 'success', 'error'
 
             useEffect(() => { setConfig(currentConfig) }, [currentConfig]);
 
@@ -127,17 +128,18 @@ INDEX_HTML = """
             };
 
             const handleSave = async () => {
+                setSaveStatus('saving');
                 try {
-                    await fetch('/api/config', {
+                    const response = await fetch('/api/config', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(config)
                     });
-                    alert('Configuration saved. Please refresh the page for changes to take effect.');
-                    onClose();
+                    if (!response.ok) throw new Error('Server failed to save config.');
+                    setSaveStatus('success');
                 } catch (error) {
                     console.error('Failed to save config:', error);
-                    alert('Error: Could not save configuration.');
+                    setSaveStatus('error');
                 }
             };
 
@@ -149,24 +151,36 @@ INDEX_HTML = """
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50">
                     <div className="p-8 rounded-2xl glass-ui w-full max-w-lg">
                         <h2 className="text-2xl font-bold text-white mb-6">Firebase Configuration</h2>
-                        <div className="space-y-4">
-                            {fields.map(field => (
-                                <div key={field}>
-                                    <label className="block text-sm font-medium text-gray-300 mb-1">{field}</label>
-                                    <input
-                                        type="text"
-                                        name={field}
-                                        value={config[field] || ''}
-                                        onChange={handleChange}
-                                        className="w-full p-2 bg-slate-900/70 rounded-lg border border-white/20 focus:ring-2 focus:ring-cyan-400 focus:outline-none text-white"
-                                    />
+                        {saveStatus === 'success' ? (
+                            <div className="text-center p-4 bg-green-500/20 border border-green-500 rounded-lg">
+                                <h3 className="font-bold text-lg text-green-300">Success!</h3>
+                                <p className="text-green-200 mt-2">Configuration saved to `config.py`.</p>
+                                <p className="text-amber-300 font-bold mt-4">ACTION REQUIRED:</p>
+                                <p className="text-amber-200">1. Stop the Python server in your terminal (Ctrl+C).</p>
+                                <p className="text-amber-200">2. Restart it with `python3 app.py`.</p>
+                                <p className="text-amber-200">3. Refresh this web page.</p>
+                                <button onClick={onClose} className="mt-6 px-5 py-2 rounded-lg bg-gray-600/50 hover:bg-gray-500/50 text-white">Close</button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="space-y-4">
+                                    {fields.map(field => (
+                                        <div key={field}>
+                                            <label className="block text-sm font-medium text-gray-300 mb-1">{field}</label>
+                                            <input type="text" name={field} value={config[field] || ''} onChange={handleChange} className="w-full p-2 bg-slate-900/70 rounded-lg border border-white/20 focus:ring-2 focus:ring-cyan-400 focus:outline-none text-white" />
+                                        </div>
+                                    ))}
                                 </div>
-                            ))}
-                        </div>
-                        <div className="mt-8 flex justify-end space-x-4">
-                            <button onClick={onClose} className="px-5 py-2 rounded-lg bg-gray-600/50 hover:bg-gray-500/50 text-white">Cancel</button>
-                            <button onClick={handleSave} className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold">Save & Close</button>
-                        </div>
+                                <div className="mt-8 flex justify-end items-center space-x-4">
+                                    {saveStatus === 'error' && <p className="text-red-400">Error: Could not save.</p>}
+                                    <button onClick={onClose} className="px-5 py-2 rounded-lg bg-gray-600/50 hover:bg-gray-500/50 text-white">Cancel</button>
+                                    <button onClick={handleSave} disabled={saveStatus === 'saving'} className="px-5 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold disabled:bg-gray-500 flex items-center">
+                                        {saveStatus === 'saving' && <Spinner />}&nbsp;
+                                        {saveStatus === 'saving' ? 'Saving...' : 'Save Config'}
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             );
@@ -197,7 +211,10 @@ INDEX_HTML = """
                     if (window.firebase) {
                         setFirebaseReady(true);
                     } else {
-                        setIsSettingsOpen(!data.apiKey); // Open settings if config is missing
+                        // Only open settings automatically if config is truly missing
+                        if (!data || !data.apiKey) {
+                            setIsSettingsOpen(true);
+                        }
                     }
                 });
             }, []);
