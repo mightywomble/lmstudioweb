@@ -48,7 +48,7 @@ INDEX_HTML = """
     <!-- Firebase SDK -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-        import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        import { getFirestore, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
         
         // IMPORTANT: Replace with your actual Firebase config
@@ -67,7 +67,7 @@ INDEX_HTML = """
         const auth = getAuth(app);
 
         // Expose to window for React component
-        window.firebase = { db, auth, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp, signInAnonymously, onAuthStateChanged };
+        window.firebase = { db, auth, collection, onSnapshot, doc, setDoc, addDoc, updateDoc, deleteDoc, query, where, getDocs, serverTimestamp, orderBy, signInAnonymously, onAuthStateChanged };
     </script>
     
     <style>
@@ -127,24 +127,39 @@ INDEX_HTML = """
 
             // --- Firebase Auth & Data Fetching ---
             useEffect(() => {
-                const { auth, onAuthStateChanged, signInAnonymously, db, collection, query, where, onSnapshot } = window.firebase;
-                onAuthStateChanged(auth, currentUser => {
+                const { auth, onAuthStateChanged, signInAnonymously, db, collection, query, where, onSnapshot, orderBy } = window.firebase;
+                
+                // This listener handles authentication and should only be set up once.
+                const unsubscribeAuth = onAuthStateChanged(auth, currentUser => {
                     if (currentUser) {
-                        setUser(currentUser);
-                        const q = query(collection(db, "chats"), where("userId", "==", currentUser.uid));
-                        const unsubscribe = onSnapshot(q, (querySnapshot) => {
-                            const chatsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                            setChats(chatsData.sort((a,b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0)));
-                            if (!activeChatId && chatsData.length > 0) {
-                                setActiveChatId(chatsData[0].id);
-                            }
-                        });
-                        return () => unsubscribe();
+                        if (!user) setUser(currentUser); // Set user only if not already set
                     } else {
                         signInAnonymously(auth);
                     }
                 });
-            }, [activeChatId]);
+
+                return () => unsubscribeAuth();
+            }, []); // Empty dependency array ensures this runs only once.
+
+            // This listener fetches chats for the current user and updates in real-time.
+            useEffect(() => {
+                if (!user) return; // Don't fetch chats until we have a user.
+
+                const { db, collection, query, where, onSnapshot, orderBy } = window.firebase;
+                const q = query(collection(db, "chats"), where("userId", "==", user.uid), orderBy("createdAt", "desc"));
+                
+                const unsubscribeChats = onSnapshot(q, (querySnapshot) => {
+                    const chatsData = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setChats(chatsData);
+                    // If there's no active chat, select the first one.
+                    if (!activeChatId && chatsData.length > 0) {
+                        setActiveChatId(chatsData[0].id);
+                    }
+                });
+
+                return () => unsubscribeChats();
+            }, [user]); // Re-run this effect if the user object changes.
+
 
             // Fetch Models
             useEffect(() => {
@@ -166,10 +181,11 @@ INDEX_HTML = """
             // Auto-scroll chat
             useEffect(() => {
                 chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: 'smooth' });
-            }, [activeChat]);
+            }, [activeChat?.messages]);
 
             // --- Handlers ---
             const handleNewChat = async () => {
+                if (!user) return;
                 const { db, addDoc, collection, serverTimestamp } = window.firebase;
                 const newChat = {
                     title: "New Chat",
@@ -189,11 +205,11 @@ INDEX_HTML = """
                 const newUserMessage = { role: 'user', content: userInput.trim() };
                 const updatedMessages = [...activeChat.messages, newUserMessage];
                 
+                // Set loading state and update UI with user's message immediately
+                setIsLoading(true);
+                setUserInput('');
                 const { db, doc, updateDoc } = window.firebase;
                 await updateDoc(doc(db, "chats", activeChatId), { messages: updatedMessages });
-
-                setUserInput('');
-                setIsLoading(true);
 
                 try {
                     const response = await fetch(`${API_BASE_URL}/api/chat`, {
@@ -205,12 +221,16 @@ INDEX_HTML = """
                     
                     const data = await response.json();
                     const assistantMessage = data.choices[0].message;
-                    await updateDoc(doc(db, "chats", activeChatId), { messages: [...updatedMessages, assistantMessage] });
+                    
+                    // Update the chat with the assistant's response
+                    const finalMessages = [...updatedMessages, assistantMessage];
+                    await updateDoc(doc(db, "chats", activeChatId), { messages: finalMessages });
 
                 } catch (error) {
                     console.error("Error sending message:", error);
                     const errorMessage = { role: 'error', content: `Error: ${error.message}` };
-                    await updateDoc(doc(db, "chats", activeChatId), { messages: [...updatedMessages, errorMessage] });
+                    const finalMessages = [...updatedMessages, errorMessage];
+                    await updateDoc(doc(db, "chats", activeChatId), { messages: finalMessages });
                 } finally {
                     setIsLoading(false);
                 }
@@ -231,13 +251,15 @@ INDEX_HTML = """
                 if (confirm("Are you sure you want to delete this chat?")) {
                     const { db, doc, deleteDoc } = window.firebase;
                     await deleteDoc(doc(db, "chats", chatId));
-                    if(activeChatId === chatId) setActiveChatId(chats.length > 1 ? chats[1].id : null);
+                    if(activeChatId === chatId) setActiveChatId(null);
                 }
             };
 
             const ChatItem = ({ chat, isActive }) => {
                 const [isEditing, setIsEditing] = useState(false);
                 const [title, setTitle] = useState(chat.title);
+
+                useEffect(() => { setTitle(chat.title) }, [chat.title]);
 
                 const onRename = (e) => {
                     e.preventDefault();
@@ -279,6 +301,9 @@ INDEX_HTML = """
             // --- Render ---
             if (!user) return <div className="flex items-center justify-center h-screen text-white"><Spinner />&nbsp;Authenticating...</div>;
 
+            const pinnedChats = chats.filter(c => c.pinned);
+            const recentChats = chats.filter(c => !c.pinned);
+
             return (
                 <div className="flex h-screen text-gray-200 font-sans">
                     {/* Sidebar */}
@@ -288,16 +313,16 @@ INDEX_HTML = """
                             {sidebarOpen && <span>New Chat</span>}
                         </button>
                         <div className="flex-grow overflow-y-auto pr-1 space-y-4">
-                            {sidebarOpen && chats.some(c => c.pinned) && (
+                            {sidebarOpen && pinnedChats.length > 0 && (
                                 <div>
                                     <h3 className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Pinned</h3>
-                                    {chats.filter(c => c.pinned).map(chat => <ChatItem key={chat.id} chat={chat} isActive={chat.id === activeChatId} />)}
+                                    {pinnedChats.map(chat => <ChatItem key={chat.id} chat={chat} isActive={chat.id === activeChatId} />)}
                                 </div>
                             )}
-                            {sidebarOpen && (
+                            {sidebarOpen && recentChats.length > 0 && (
                                 <div>
                                     <h3 className="px-2 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Recent</h3>
-                                    {chats.filter(c => !c.pinned).map(chat => <ChatItem key={chat.id} chat={chat} isActive={chat.id === activeChatId} />)}
+                                    {recentChats.map(chat => <ChatItem key={chat.id} chat={chat} isActive={chat.id === activeChatId} />)}
                                 </div>
                             )}
                         </div>
