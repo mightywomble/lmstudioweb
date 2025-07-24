@@ -19,12 +19,12 @@ import json
 import os
 
 # --- Configuration ---
-LM_STUDIO_BASE_URL = "http://macos:1234/v1"
+# The Python server will proxy requests to the LM Studio server at this address.
+# This is not configurable from the UI.
+LM_STUDIO_BASE_URL = "http://localhost:1234/v1"
 APP_PORT = 5010
 
 # --- Flask App Initialization ---
-# We specify the 'static_folder' to be 'dist' where our index.html will live.
-# However, for a single-file setup, we'll serve it directly.
 app = Flask(__name__)
 CORS(app) # Enable CORS for all routes
 
@@ -51,23 +51,35 @@ INDEX_HTML = """
         /* Custom scrollbar for a sleeker look */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 4px; border: 1px solid rgba(0,0,0,0.2); }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.4); }
         
-        /* Base styling for the glass effect */
+        /* Enhanced glass effect */
         .glass-ui {
-            background-color: rgba(28, 37, 54, 0.6); /* Semi-transparent background */
-            backdrop-filter: blur(15px);
-            -webkit-backdrop-filter: blur(15px);
+            background-color: rgba(30, 41, 59, 0.5); /* bg-slate-800 with 50% opacity */
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        /* Background pattern to make the glass pop */
+        body {
+            background-color: #020617; /* bg-slate-950 */
+            background-image: 
+                radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0);
+            background-size: 2rem 2rem;
         }
     </style>
 </head>
-<body class="bg-gray-900 bg-gradient-to-br from-gray-900 to-slate-800">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+        
+        // The API URL is now fixed to the origin where the page is served from.
+        // This simplifies the app by removing the need for a settings panel.
+        const API_BASE_URL = window.location.origin;
 
         // --- Helper Components ---
 
@@ -75,29 +87,16 @@ INDEX_HTML = """
             <div className="w-5 h-5 border-2 border-dashed rounded-full animate-spin border-white"></div>
         );
 
-        const SettingsIcon = () => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300 hover:text-white transition-colors">
-                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
-                <circle cx="12" cy="12" r="3"></circle>
-            </svg>
-        );
-
         // --- Main Application ---
         const App = () => {
             // State Management
             const [messages, setMessages] = useState([{ role: 'assistant', content: 'Hello! Select a model and ask me anything.' }]);
             const [userInput, setUserInput] = useState('');
-            const [isLoading, setIsLoading] = useState(false);
+            const [isLoading, setIsLoading] = useState(false); // For message responses
+            const [isFetchingModels, setIsFetchingModels] = useState(true); // For initial model load
             const [models, setModels] = useState([]);
             const [selectedModel, setSelectedModel] = useState('');
-            const [isSettingsOpen, setIsSettingsOpen] = useState(false);
             
-            // Default API URL, can be overridden by settings
-            const [apiUrl, setApiUrl] = useState(() => {
-                return localStorage.getItem('lmstudioApiUrl') || window.location.origin;
-            });
-            const [tempApiUrl, setTempApiUrl] = useState(apiUrl);
-
             const chatContainerRef = useRef(null);
 
             // --- Effects ---
@@ -105,11 +104,10 @@ INDEX_HTML = """
             // Fetch available models on component mount
             useEffect(() => {
                 const fetchModels = async () => {
-                    if (!apiUrl) return;
-                    setIsLoading(true);
+                    setIsFetchingModels(true);
                     try {
-                        const response = await fetch(`${apiUrl}/api/models`);
-                        if (!response.ok) throw new Error('Failed to fetch models.');
+                        const response = await fetch(`${API_BASE_URL}/api/models`);
+                        if (!response.ok) throw new Error('Failed to fetch models from the server.');
                         const data = await response.json();
                         
                         const loadedModels = data.data || [];
@@ -122,13 +120,13 @@ INDEX_HTML = """
                         }
                     } catch (error) {
                         console.error("Error fetching models:", error);
-                        setMessages(prev => [...prev, { role: 'error', content: `Connection Error: Could not connect to the backend at ${apiUrl}. Check the URL in Settings.`}]);
+                        setMessages(prev => [...prev, { role: 'error', content: `Connection Error: Could not connect to the Python Server at ${API_BASE_URL}. Please ensure the server is running and accessible.`}]);
                     } finally {
-                        setIsLoading(false);
+                        setIsFetchingModels(false);
                     }
                 };
                 fetchModels();
-            }, [apiUrl]);
+            }, []); // Empty dependency array means this runs only once on mount
 
             // Auto-scroll chat
             useEffect(() => {
@@ -149,7 +147,7 @@ INDEX_HTML = """
                 setIsLoading(true);
 
                 try {
-                    const response = await fetch(`${apiUrl}/api/chat`, {
+                    const response = await fetch(`${API_BASE_URL}/api/chat`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
@@ -175,69 +173,53 @@ INDEX_HTML = """
                 }
             };
 
-            const handleSaveSettings = () => {
-                setApiUrl(tempApiUrl);
-                localStorage.setItem('lmstudioApiUrl', tempApiUrl);
-                setIsSettingsOpen(false);
-                // Optionally, reload or re-fetch models
-                window.location.reload(); 
-            };
-
             // --- Render ---
 
             return (
                 <div className="flex flex-col h-screen text-gray-200 font-sans">
                     {/* Header */}
-                    <header className="p-4 glass-ui flex items-center justify-between z-10">
-                        <div className="flex-1">
-                            <h1 className="text-xl md:text-2xl font-bold text-white">LM Studio</h1>
-                        </div>
-                        <div className="flex-1 flex justify-center">
-                            {models.length > 0 ? (
-                                <select 
-                                    value={selectedModel} 
-                                    onChange={e => setSelectedModel(e.target.value)}
-                                    className="bg-white/10 border border-white/20 rounded-lg px-3 py-1.5 text-sm text-white focus:ring-2 focus:ring-cyan-400 focus:outline-none"
-                                >
-                                    {models.map(model => (
-                                        <option key={model.id} value={model.id} className="bg-gray-800">
-                                            {model.id.split('/').pop()}
-                                        </option>
-                                    ))}
-                                </select>
-                            ) : (
-                                <span className="text-sm text-gray-400">No models loaded</span>
-                            )}
-                        </div>
-                        <div className="flex-1 flex justify-end">
-                            <button onClick={() => setIsSettingsOpen(true)} className="p-2 rounded-full hover:bg-white/10">
-                                <SettingsIcon />
-                            </button>
-                        </div>
+                    <header className="p-4 glass-ui flex items-center justify-center relative shadow-lg rounded-b-3xl mx-auto mt-4 w-[95%] max-w-4xl">
+                        {isFetchingModels ? (
+                            <span className="text-sm text-gray-300 animate-pulse">Fetching models...</span>
+                        ) : models.length > 0 ? (
+                            <select 
+                                value={selectedModel} 
+                                onChange={e => setSelectedModel(e.target.value)}
+                                className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-cyan-400 focus:outline-none appearance-none text-center cursor-pointer"
+                            >
+                                {models.map(model => (
+                                    <option key={model.id} value={model.id} className="bg-slate-800">
+                                        {model.id.split('/').pop()}
+                                    </option>
+                                ))}
+                            </select>
+                        ) : (
+                            <span className="text-sm text-red-400">No Models Loaded in LM Studio</span>
+                        )}
                     </header>
 
                     {/* Chat Area */}
                     <main ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto">
-                        <div className="max-w-4xl mx-auto space-y-6">
+                        <div className="max-w-4xl mx-auto space-y-8">
                             {messages.map((msg, index) => {
                                 const isUser = msg.role === 'user';
                                 const isError = msg.role === 'error';
                                 const bubbleClasses = isUser 
-                                    ? 'bg-cyan-600/70 self-end' 
+                                    ? 'bg-cyan-500/50 self-end' 
                                     : isError
-                                    ? 'bg-red-500/70 self-start'
-                                    : 'bg-slate-700/70 self-start';
+                                    ? 'bg-red-500/60 self-start'
+                                    : 'bg-slate-700/60 self-start';
                                 return (
                                     <div key={index} className={`w-full flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-                                        <div className={`max-w-xl lg:max-w-3xl p-4 rounded-2xl text-white glass-ui ${bubbleClasses}`}>
+                                        <div className={`max-w-xl lg:max-w-3xl p-4 rounded-3xl text-white glass-ui ${bubbleClasses}`}>
                                             <p style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</p>
                                         </div>
                                     </div>
                                 );
                             })}
-                            {isLoading && !messages.some(m => m.role === 'assistant' && m.content === '') && (
+                            {isLoading && (
                                 <div className="flex justify-start">
-                                    <div className="p-4 rounded-2xl flex items-center space-x-3 glass-ui bg-slate-700/70">
+                                    <div className="p-4 rounded-3xl flex items-center space-x-3 glass-ui bg-slate-700/60">
                                         <Spinner />
                                         <span className="text-white text-sm">Thinking...</span>
                                     </div>
@@ -247,7 +229,7 @@ INDEX_HTML = """
                     </main>
 
                     {/* Input Footer */}
-                    <footer className="p-4 glass-ui z-10">
+                    <footer className="p-4 glass-ui rounded-t-3xl mx-auto mb-4 w-[95%] max-w-4xl">
                         <div className="max-w-4xl mx-auto">
                             <form onSubmit={handleSendMessage} className="flex items-center space-x-4">
                                 <input
@@ -255,12 +237,12 @@ INDEX_HTML = """
                                     value={userInput}
                                     onChange={(e) => setUserInput(e.target.value)}
                                     placeholder={selectedModel ? "Message " + selectedModel.split('/').pop() : "Please select a model..."}
-                                    className="flex-1 p-3 bg-gray-800/50 rounded-xl border border-white/20 focus:ring-2 focus:ring-cyan-400 focus:outline-none text-white transition"
+                                    className="flex-1 p-4 bg-slate-900/50 rounded-2xl border border-white/20 focus:ring-2 focus:ring-cyan-400 focus:outline-none text-white transition"
                                     disabled={isLoading || !selectedModel}
                                 />
                                 <button
                                     type="submit"
-                                    className="p-3 bg-cyan-600 rounded-xl text-white font-bold hover:bg-cyan-500 disabled:bg-gray-500/50 disabled:cursor-not-allowed transition-colors flex items-center justify-center w-24"
+                                    className="p-4 bg-cyan-600 rounded-2xl text-white font-bold hover:bg-cyan-500 disabled:bg-slate-600/50 disabled:cursor-not-allowed transition-colors flex items-center justify-center w-28"
                                     disabled={isLoading || !userInput.trim()}
                                 >
                                     {isLoading ? <Spinner /> : 'Send'}
@@ -268,30 +250,6 @@ INDEX_HTML = """
                             </form>
                         </div>
                     </footer>
-
-                    {/* Settings Modal */}
-                    {isSettingsOpen && (
-                        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50">
-                            <div className="p-8 rounded-2xl glass-ui w-full max-w-md">
-                                <h2 className="text-2xl font-bold text-white mb-4">Settings</h2>
-                                <div className="space-y-2">
-                                    <label htmlFor="apiUrlInput" className="block text-sm font-medium text-gray-300">Backend URL</label>
-                                    <input
-                                        id="apiUrlInput"
-                                        type="text"
-                                        value={tempApiUrl}
-                                        onChange={e => setTempApiUrl(e.target.value)}
-                                        className="w-full p-2 bg-gray-800/80 rounded-lg border border-white/20 focus:ring-2 focus:ring-cyan-400 focus:outline-none text-white"
-                                    />
-                                    <p className="text-xs text-gray-400">This is the address of the Python server (e.g., http://192.168.1.10:5010).</p>
-                                </div>
-                                <div className="mt-6 flex justify-end space-x-4">
-                                    <button onClick={() => setIsSettingsOpen(false)} className="px-4 py-2 rounded-lg bg-gray-600/50 hover:bg-gray-500/50 text-white">Cancel</button>
-                                    <button onClick={handleSaveSettings} className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold">Save & Reload</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
                 </div>
             );
         };
