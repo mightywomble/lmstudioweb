@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LM Studio Web UI</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React and Babel for the UI component -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        /* Simple scrollbar styling for a cleaner look */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1f2937; /* bg-gray-800 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #4b5563; /* bg-gray-600 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; /* bg-gray-500 */
+        }
+        body {
+            background-color: #111827; /* bg-gray-900 */
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Configuration: Point this to your Flask backend's address.
+        // If your browser is on a different device than the Mac Mini,
+        // replace 'localhost' with the Mac Mini's local IP address (e.g., http://192.168.1.10:5001)
+        const API_BASE_URL = "http://localhost:5001";
+
+        // --- React Components ---
+
+        // A simple loading spinner component
+        const Spinner = () => (
+            <div className="w-6 h-6 border-4 border-dashed rounded-full animate-spin border-sky-400"></div>
+        );
+        
+        // Component for rendering individual chat messages
+        const ChatMessage = ({ message }) => {
+            const isUser = message.role === 'user';
+            const isError = message.role === 'error';
+
+            const bubbleClasses = isUser 
+                ? 'bg-sky-600 self-end' 
+                : isError
+                ? 'bg-red-500 self-start'
+                : 'bg-gray-700 self-start';
+            
+            const containerClasses = `w-full flex ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            return (
+                <div className={containerClasses}>
+                    <div className={`max-w-xl lg:max-w-3xl p-4 rounded-2xl text-white ${bubbleClasses}`}>
+                        <p style={{ whiteSpace: 'pre-wrap' }}>{message.content}</p>
+                    </div>
+                </div>
+            );
+        };
+
+        // Main Application Component
+        const App = () => {
+            const [messages, setMessages] = useState([
+                { role: 'assistant', content: 'Hello! How can I help you today?' }
+            ]);
+            const [userInput, setUserInput] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [loadedModel, setLoadedModel] = useState('Checking...');
+            const chatContainerRef = useRef(null);
+
+            // --- Effects ---
+
+            // Fetch the loaded model info when the component mounts
+            useEffect(() => {
+                const fetchModel = async () => {
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/api/models`);
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch model info. Is the Flask backend running?');
+                        }
+                        const data = await response.json();
+                        if (data.data && data.data.length > 0) {
+                            // The model name is often in the 'id' field
+                            setLoadedModel(data.data[0].id);
+                        } else {
+                            setLoadedModel('No model loaded in LM Studio');
+                        }
+                    } catch (error) {
+                        console.error("Error fetching model:", error);
+                        setLoadedModel('Error connecting to server');
+                        setMessages(prev => [...prev, { role: 'error', content: `Connection Error: Could not connect to the backend at ${API_BASE_URL}. Make sure the Flask server is running and accessible.`}]);
+                    }
+                };
+                fetchModel();
+            }, []);
+
+            // Auto-scroll to the bottom of the chat when new messages are added
+            useEffect(() => {
+                if (chatContainerRef.current) {
+                    chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+                }
+            }, [messages]);
+
+            // --- Event Handlers ---
+
+            const handleSendMessage = async (e) => {
+                e.preventDefault();
+                if (!userInput.trim() || isLoading) return;
+
+                const newUserMessage = { role: 'user', content: userInput.trim() };
+                const updatedMessages = [...messages, newUserMessage];
+                
+                setMessages(updatedMessages);
+                setUserInput('');
+                setIsLoading(true);
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/chat`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        // Send the relevant message history to the model
+                        body: JSON.stringify({ messages: updatedMessages }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.details || 'An unknown error occurred.');
+                    }
+
+                    const data = await response.json();
+                    const assistantMessage = data.choices[0].message;
+
+                    setMessages(prev => [...prev, assistantMessage]);
+
+                } catch (error) {
+                    console.error("Error sending message:", error);
+                    const errorMessage = { role: 'error', content: `Error: ${error.message}. Is LM Studio running with a model loaded?` };
+                    setMessages(prev => [...prev, errorMessage]);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            return (
+                <div className="flex flex-col h-screen bg-gray-900 text-gray-100 font-sans">
+                    {/* Header */}
+                    <header className="p-4 bg-gray-800 border-b border-gray-700 shadow-md">
+                        <div className="max-w-6xl mx-auto flex justify-between items-center">
+                            <h1 className="text-xl md:text-2xl font-bold text-white">LM Studio Web UI</h1>
+                            <div className="text-right">
+                                <span className="text-xs text-gray-400 block">Loaded Model</span>
+                                <span className="font-mono text-xs md:text-sm text-green-400 truncate">{loadedModel}</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Chat Messages */}
+                    <main ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto">
+                        <div className="max-w-6xl mx-auto space-y-6">
+                            {messages.map((msg, index) => <ChatMessage key={index} message={msg} />)}
+                            {isLoading && (
+                                <div className="flex justify-start">
+                                    <div className="p-4 rounded-2xl bg-gray-700 flex items-center space-x-3">
+                                        <Spinner />
+                                        <span className="text-white">Thinking...</span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </main>
+
+                    {/* Message Input Form */}
+                    <footer className="p-4 bg-gray-800/80 backdrop-blur-sm border-t border-gray-700">
+                        <div className="max-w-6xl mx-auto">
+                            <form onSubmit={handleSendMessage} className="flex items-center space-x-4">
+                                <input
+                                    type="text"
+                                    value={userInput}
+                                    onChange={(e) => setUserInput(e.target.value)}
+                                    placeholder="Type your message here..."
+                                    className="flex-1 p-3 bg-gray-700 rounded-lg border border-gray-600 focus:ring-2 focus:ring-sky-500 focus:outline-none text-white transition"
+                                    disabled={isLoading}
+                                />
+                                <button
+                                    type="submit"
+                                    className="p-3 bg-sky-600 rounded-lg text-white font-bold hover:bg-sky-500 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors flex items-center justify-center w-24"
+                                    disabled={isLoading || !userInput.trim()}
+                                >
+                                    {isLoading ? <Spinner /> : 'Send'}
+                                </button>
+                            </form>
+                            <p className="text-center text-xs text-gray-500 mt-3">
+                                Note: Downloading new models must be done in the LM Studio desktop application. This UI interacts with the currently loaded model.
+                            </p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
