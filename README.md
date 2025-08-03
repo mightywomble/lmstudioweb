@@ -149,3 +149,83 @@ This application uses Firebase to save your chats. You will need a free Firebase
 8.  **Reload the Web Page**:
     - Refresh your browser. The application is now fully configured and ready to use!
 
+### Step 5: Optional - Running as a Service on macOS
+
+To have the application start automatically when you log in and run continuously in the background, you can create a `launchd` service.
+
+1.  **Find your Python 3 Path**:
+    First, you need the full path to your `python3` executable. Open your terminal and run:
+    ```bash
+    which python3
+    ```
+    Copy the output. It will look something like `/usr/local/bin/python3` or `/opt/homebrew/bin/python3`.
+
+2.  **Create the Service File**:
+    Create a new file named `com.david.lmstudioui.plist` in the following directory: `~/Library/LaunchAgents/`.
+
+    *Note: The `~/Library/` folder is hidden by default. In Finder, you can click **Go > Go to Folder...** and paste `~/Library/LaunchAgents/`.*
+
+    Paste the following XML content into the file. **Make sure to replace `/path/to/your/python3` with the actual path you found in the previous step.**
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "[http://www.apple.com/DTDs/PropertyList-1.0.dtd](http://www.apple.com/DTDs/PropertyList-1.0.dtd)">
+    <plist version="1.0">
+    <dict>
+        <key>Label</key>
+        <string>com.david.lmstudioui</string>
+        <key>ProgramArguments</key>
+        <array>
+            <string>/path/to/your/python3</string>
+            <string>/Users/david/code/lmstudio_webinterface/app.py</string>
+        </array>
+        <key>WorkingDirectory</key>
+        <string>/Users/david/code/lmstudio_webinterface</string>
+        <key>RunAtLoad</key>
+        <true/>
+        <key>KeepAlive</key>
+        <true/>
+        <key>StandardOutPath</key>
+        <string>/Users/david/code/lmstudio_webinterface/logs/stdout.log</string>
+        <key>StandardErrorPath</key>
+        <string>/Users/david/code/lmstudio_webinterface/logs/stderr.log</string>
+    </dict>
+    </plist>
+    ```
+
+3.  **Create a Logs Directory**:
+    In your project folder (`/Users/david/code/lmstudio_webinterface/`), create a new directory named `logs`. The service will write its output here.
+    ```bash
+    cd /Users/david/code/lmstudio_webinterface
+    mkdir logs
+    ```
+
+4.  **Load and Start the Service**:
+    Open your terminal and run the following command to load the service. It will start automatically on your next login, but you can start it immediately for the current session.
+
+    ```bash
+    # Load the service (makes it active for future logins)
+    launchctl load ~/Library/LaunchAgents/com.david.lmstudioui.plist
+
+    # Start the service immediately
+    launchctl start com.david.lmstudioui
+    ```
+
+The application should now be running in the background. You can access it at `http://localhost:5010`.
+
+#### Managing the Service
+
+-   **To stop the service**:
+    ```bash
+    launchctl stop com.david.lmstudioui
+    ```
+-   **To unload the service (so it doesn't start on login anymore)**:
+    ```bash
+    launchctl unload ~/Library/LaunchAgents/com.david.lmstudioui.plist
+    ```
+-   **To check the logs**:
+    ```bash
+    tail -f /Users/david/code/lmstudio_webinterface/logs/stdout.log
+    ```
+
+</markdown>
